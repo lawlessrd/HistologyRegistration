@@ -31,7 +31,7 @@ subject = '6356';
 
 nii_file = 'SpineAnatImg.nii';
 
-%% Set spacing and slice start info
+%% Set spacing, thickness, and slice start info
 
 % Starting slice on nifti
 nii_slice = 2;
@@ -43,15 +43,15 @@ hist_n_slices = 25;
 % thickness + spacing of histology
 hist_thick = 0.3; % mm
 
-cd(nii_dir);
-%
-match_fov(home,nii_file,subject, nii_slice, hist_n_slices, hist_thick)
+
+cd(sprintf('%s/%s',home,nii_dir));
 
 %% Use SCT to resample and segment MRI
+% Problem: segmentation includes CSF
+monkey_spine_SCT_seg(nii_file,subject);
 
-%cd(nii_dir);
-[nii_info,nii_img,nii_zero,nii_seg] = monkey_spine_SCT_seg(subject);
-
+%% Match FOV between hist and mri data
+[nii_info,nii_img,nii_seg] = match_fov(subject, nii_slice, hist_n_slices, hist_thick);
 
 %% Load in jpg images, export grayscale and RGB versions
 % remove unwanted jpgs from directory before running
@@ -63,23 +63,25 @@ cd(jpg_dir);
 
 % inv colors to better represent MRI data
 jpg_img_inv = imcomplement(jpg_img);
-jpg_img_s = zeros([size(jpg_img,[1,2]),size(nii_zero,3)]);
+jpg_img_s = zeros([size(jpg_img,[1,2]),size(nii_img,3)]);
 
 % set range of values to match nii
 % need to edit for image spacing here, will only use jpgs up to max number
 % of nifti slices
-for i = 1:size(nii_zero,3)
-    nii_tmp = nii_zero(:,:,i);
+for i = 1:size(nii_img,3)
+    nii_tmp = nii_img(:,:,i);
     jpg_img_s(:,:,i) = double(max(nii_tmp(:)) * mat2gray(jpg_img_inv(:,:,i)));
 end
 
-%% mask jpg 
+%% mask jpg and rotate to match mri
 
 thresh = 0.5;
 check = 1;
 
 [jpg_mask] = mask_hist(RGB_img,thresh,check);
 
+jpg_mask = imrotate(jpg_mask,90);
+jpg_img_s = imrotate(jpg_img_s,90);
 
 %% shrink hist and zero pad to match size of MRI
 
@@ -98,8 +100,8 @@ for i = 1:size(nii_img,3)
     col_max = max(col);
     col_diff = col_max-col_min;
     
-    jpg_shrink{i} = imresize(jpg_img_s(:,:,i), [row_diff+1,col_diff+1]);
-    jpg_mask_shrink{i}=imresize(jpg_mask(:,:,i), [row_diff+1,col_diff+1]);
+    jpg_shrink{i} = flipud(imresize(jpg_img_s(:,:,i), [row_diff+1,col_diff+1]));
+    jpg_mask_shrink{i}=flipud(imresize(jpg_mask(:,:,i), [row_diff+1,col_diff+1]));
     
     jpg_mask_shrink{i}(jpg_mask_shrink{i} > 0.3) = 1;
     jpg_mask_shrink{i}(jpg_mask_shrink{i} < 0.3) = 0;
@@ -123,29 +125,37 @@ end
 figure(); subplot(121); dispimg(nii_img(:,:,1));
 subplot(122); dispimg(fake_nii(:,:,1));
 
+%%
 cd(home);
 cd(nii_dir);
 cd(dir('*_SCT').name)
 
-niftiwrite(single(imrotate(fake_nii,90)), 'hist_nii_r.nii',nii_info);
-niftiwrite(single(imrotate(mask_nii,90)), 'hist_nii_r_seg.nii',nii_info);
+%imrotate(fake_nii,90)
+
+niftiwrite(single(fake_nii), 'hist_nii_r.nii',nii_info);
+niftiwrite(single(mask_nii), 'hist_nii_r_seg.nii',nii_info);
 
 unix('gzip hist_nii_r.nii hist_nii_r_seg.nii');
 
 %% Register images using SCT
-inp = sprintf(['sct_register_multimodal -i hist_nii_r.nii.gz -iseg hist_nii_r_seg.nii.gz ' ...
-  '-d anat_r_zero.nii.gz -dseg anat_r_zero_seg.nii.gz ' ...
+%
+inp = sprintf(['sct_register_multimodal -i hist_nii_r.nii.gz -iseg '... 
+  'hist_nii_r_seg.nii.gz -d anat_r.nii.gz -dseg anat_seg_r.nii.gz ' ...
   '-o hist2mri.nii.gz -owarp warp_hist2mri.nii.gz ' ...
   '-param step=1,type=seg,algo=centermass,metric=MeanSquares:' ...
   'step=2,type=seg,algo=columnwise,metric=MeanSquares']);
 
 unix(inp);
 
+unix('fsleyes anat_r.nii.gz hist2mri.nii.gz &')
+
+%% DONE! %%
+
+%%
+%%%%%% UNUSED FUNCTIONS %%%%%%%
 %% Check results
-% hist_nii size is a bit off
-% correct spacing
-% make github repo
 % set histology nifti name to include stain
+% How to (not manually) add missing parts to hist masks 
 
 %% adjust contrast of cropped nii to improve segmentation
 % nii_crop = niftiread('SpineAnatImg.nii');

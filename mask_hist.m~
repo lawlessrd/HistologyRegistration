@@ -1,7 +1,7 @@
 function [jpg_mask] = mask_hist(RGB_img,thresh,check)
 % RGB img:
 % threshold: theshold for keeping voxels in mask
-%check: set check = 1 to view results at end of function
+%check: set check = 1 to view res
 
 
 jpg_mask = zeros(size(RGB_img,[1,2,4]));
